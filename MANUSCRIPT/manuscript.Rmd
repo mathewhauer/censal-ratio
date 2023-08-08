@@ -1,5 +1,5 @@
 ---
-title: Descriptive Paper Title
+title: A Simple Example of the Censal Ratio Method for Population Estimation
 
 # to produce blinded version set to 1
 blinded: 0
@@ -9,8 +9,6 @@ authors:
   thanks:  Thanks y'all!
   affiliation: Department of Sociology, Florida State University
   
-- name: Scientist 2
-  affiliation: Department of Department, Random State University
 
 keywords:
 - keyword
@@ -50,45 +48,147 @@ header-includes:
 ```{r setup, include=FALSE}
 rm( list=ls() )
 knitr::opts_chunk$set(echo  = TRUE)
-# knitr::opts_chunk$set(cache = TRUE)
-# read_chunk loads script files and
-# creates labels so that they can be 
-# used later in the program
-#
-# each script file starts with a line
-# like 
-#   ## @knitr libraries
-# that creates a label matching the
-# script's filename
 library(knitr)
-read_chunk('../R/SCRIPTS/000-Libraries.R')
+
 ```
 
-```{r libraries, include=FALSE}
+```{r , include = FALSE}
+library(tidyverse)
+library(readxl)
+library(tidycensus)
+library(cowplot)
+library(scales)
+## Getting the Voter Registration Data for Alabama Counties in July 2023
+if(!file.exists("../R/DATA-RAW/ALVR-2010.xls")){
+  download.file("https://www.sos.alabama.gov/sites/default/files/election-data/2017-06/ALVR-2010.xls",
+                destfile = "../R/DATA-RAW/ALVR-2010.xls", mode="wb")
+}
+
+## Getting the Voter Registration Data for Kentucky Counties in September 2020 (this is the closest to Month to July with excel files)
+if(!file.exists("../R/DATA-RAW/ALVR-2019.xls")){
+  download.file("https://www.sos.alabama.gov/sites/default/files/election-data/2020-01/ALVR-2019.xls",
+                "../R/DATA-RAW/ALVR-2019.xls", mode="wb")
+}
+
+
+## Transforming the Voter Registration Data
+AL2010 <- read_xls("../R/DATA-RAW/ALVR-2010.xls") %>%
+  dplyr::select(`COUNTY` = `...1`,
+                `RegVoters` = `Total Active & Inactive`) %>%
+  mutate(YEAR = 2010)
+
+AL2019 <- read_xls("../R/DATA-RAW/ALVR-2019.xls") %>%
+  dplyr::select(`COUNTY` = `...1`,
+                `RegVoters` = `Total Active & Inactive`) %>%
+  mutate(YEAR = 2019)
+
+ALVoters <- rbind(AL2010, AL2019) %>%
+  na.omit() %>%
+  # mutate(COUNTY =  str_to_title(COUNTY)) %>%
+  mutate(NAME = str_replace(COUNTY, "_", ". ")) %>%
+  pivot_wider(names_from = YEAR, names_glue = "RegVoters_{YEAR}", values_from=RegVoters)
+
+
+## Getting Population Counts for the 2010s
+Pop <- get_estimates(geography = "county",
+                     state = "AL",
+                     product = "population",
+                     time_series=TRUE) %>%
+  filter(DATE %in% c(3, 12),
+         variable == "POP") %>%
+  mutate(NAME = toupper(str_remove(NAME, " County, Alabama")),
+         YEAR = if_else(DATE == 3, 2010, 2019))  %>%
+  dplyr::select(-DATE) %>%
+  pivot_wider(names_from = YEAR, names_glue = "Pop_{YEAR}", values_from = value)
+## Reminder that DATE == 3 is 07/01/2010 and  DATE == 12 is 07/01/2019
+
+dat <- left_join(ALVoters, Pop) %>%
+  na.omit() %>%
+  dplyr::select(-NAME, -variable) %>%
+  mutate(SymRat2010 = RegVoters_2010/Pop_2010,
+         PopEst2019 = RegVoters_2019 / SymRat2010,
+         NumError = abs((PopEst2019 - Pop_2019)),
+         PerError = abs(NumError / Pop_2019))
+
+
+Aval <- prettyNum(dat$PopEst2019[which(dat$COUNTY == "AUTAUGA")], digits = 1, big.mark = ",")
+regvot19 <- prettyNum(dat$RegVoters_2019[which(dat$COUNTY == "AUTAUGA")], digits = 1, big.mark = ",")
+
+regvot10 <- prettyNum(dat$RegVoters_2010[which(dat$COUNTY == "AUTAUGA")], digits = 1, big.mark = ",")
+pop10 <- prettyNum(dat$Pop_2010[which(dat$COUNTY == "AUTAUGA")], digits = 1, big.mark = ",")
+rat <-  prettyNum(dat$SymRat2010[which(dat$COUNTY == "AUTAUGA")], digits = 4, big.mark = ",")
+
+tabs <- dat[,9:10]
+tabs <- rename(tabs, `Absolute Numeric Error` = NumError,
+               `Absolute Percent Error` = PerError)
 ```
 
 
 # Introduction
 
-This is an introduction. This is a citation [@foxBackNoAnalogFuture2007]
+Population estimation is generally a straightforward process: any population must result from a past population number plus the births minus the deaths plus the net migration. This cohort-component method is often considered the 'gold standard' for population estimation [@gerland2014population]. However, the components of change are often lagging indicators, sometimes preventing immediate estimation of a population until all births, deaths, and migrants are enumerated, some populations do not have components of change due to their small population size or geography, and sometimes more temporally granular population estimates are desired for which no components of change exist. 
+
+Alternative, indirect population estimation methods exist to produce population estimates in situations when a traditional cohort-component method cannot be readily deployed. One such useful method is the Censal Ratio Method [@bogue1950technique] which has both a straight-forward interpretation and requires very little data. The method assumes that population change between two periods occurs in the same ratio as a given symptomatic indicator -- ideally with a symptomatic indicator correlated with the population total. Traditionally, this is accomplished with vital registration data but symptomatic indicators are not limited to vital events. Mathematically, 
+
+$$  P_t = \frac{S_{t}}{S_{t-1} / P_{t-1}}$$
+
+Where $S_{t}$ is a given symptomatic indicator at time $t$. $S_{t-1}/P_{t-1}$ is simply the ratio ($r$) of the symptomatic indicator to the population. This equation could also be written as $P_t=S_t/r$.
+
+Such symptomatic indicators could be vital event registrations, school enrollments, voter registration, drivers licenses, electrical usage, etc., making the method attractive for estimating populations where the more data-hungry Cohort-Component is not feasible. The more closely a symptomatic indicator correlates with the population to be estimated, the better the method performs. Further refinements of the Censal Ratio Method exist, including regression-based approaches [@bryan2004population] and the inclusion of uncertainty [@swanson2012censal]. 
+
+Consider the following example using voter registration data for Alabama Counties^[Data accessed 8/08/2023 via https://www.sos.alabama.gov/alabama-votes/voter/election-data]. Using voter registration data in 2010 and 2019, we could estimate the population in Alabama Counties using only population data for 2010, assuming that the relationship between voter registration and total population is the same in both 2010 and 2019. For example, Autauga County Alabama had `r prettyNum(dat$RegVoters_2010[which(dat$COUNTY == "AUTAUGA")], big.mark = ",")` registered votes in 2010, a County population total of `r prettyNum(dat$Pop_2010[which(dat$COUNTY == "AUTAUGA")], big.mark = ",")` at Census 2010, and had `r prettyNum(dat$RegVoters_2019[which(dat$COUNTY == "AUTAUGA")], big.mark = ",")` registered voters in 2019. Assuming the relationship between registered voters and total population remained unchanged in 2019 compared to 2010, the Censal Ratio Method would estimate Autauga's 2019 population as `r Aval`. 
+
+$$r = \frac{S_{t-1}}{P_{t-1}} = `r paste(rat)` = \frac{`r paste(regvot10)`}{`r paste(pop10)`}$$
+$$ P_{t} = \frac{S_t}{r} = `r paste(Aval)` = \frac{`r paste(regvot19)`}{`r paste(rat)`}$$
+
+Oftentimes a symptomatic indicator is used at face value to estimate a population when it might seem closely correlated with population totals. For example, announced attendance for a sporting event could be closely correlated with the daytime population during that sporting event, the net difference between in-bound and out-bound flight passengers might be closely correlated with net migration, or the number of social media users in a given area might be closely correlated with the population total of that area. But symptomatic indicators rarely perfectly correlate with population values and using the symptomatic indicator alone will lead to erroneous estimation.
+
+**\autoref{figure1}** shows the Censal Ratio Method for all Alabama Counties and shows such erroneous estimation. Voter registration is closely correlated with county populations in the United States but using only voter registration would lead to an underestimation of Alabama county populations (**\autoref{figure1}a**). However, by incorporating the ratio of voter registration to the total population, our population estimates using the Censal Ratio Method perform considerably better (**\autoref{figure1}b**).  
+
+Thus, the Censal Ratio Method is a simple, useful, and intuitive approach to estimating populations when a Cohort-Component approach is not feasible.
 
 
-You can also embed plots (**\autoref{fig-pressure}**), for example:
+```{r Figure1, echo=FALSE, message = FALSE, warning = FALSE, dev = c("png", "pdf"),dpi=300,fig.cap= paste("**Relationship between registered voters and population in Alabama Counties.** Solid diagonal lines are y=x. (a) shows the relationship between registered voters and population totals in Alabama Counties in 2010. Notice that there are always fewer registered voters in each county than total people. Strictly using a symptomatic indicator -- voter registration in this case -- would yield an underestimate of populations. (b) shows the relationship between county populations in 2019 and estimates produced using the Censal Ratio method. Notice how the Censal Ratio Method produces much more accurate estimates than the symptomatic indicator alone. \\label{figure1}")}
 
-```{r pressure, echo=FALSE, message = FALSE, warning = FALSE, dev = c("png", "pdf"),dpi=300,fig.cap= paste("**Title of the figure.** Solid dots show blah blah blah. \\label{fig-pressure}")}
+a<-
+  ggplot(dat, aes(x = RegVoters_2010, y = Pop_2010)) +
+  geom_point() +
+  scale_y_continuous(label=comma,
+                     limits = c(0, 800000)) +
+  scale_x_continuous(label=comma,
+                     limits = c(0, 800000)) +
+  theme_bw() +
+  geom_abline(slope=1, intercept = 0) +
+  labs(x = "Registered Voters in 2010",
+       y = "Population in 2010"
+       #title = "Relationship between Registered Voters and \n Population in Alabama Counties"
+       )
 
-plot(pressure)
+b <-ggplot(dat, aes(x = PopEst2019, y = Pop_2019)) +
+  geom_point() +
+  theme_bw() +
+  scale_y_continuous(label=comma,
+                    limits = c(0, 800000) ) +
+  scale_x_continuous(label=comma,
+                     limits = c(0, 800000)) +
+  geom_abline(slope=1, intercept = 0) +
+  labs(x = "Censal Ratio Pop Estimate 2019",
+       y = "Pop Estimate 2019")
+
+plot_grid(a,b, ncol=1, labels = c("a", "b"),
+          align = "v")
 ```
 
-And you can embed tables (**\autoref{error-table}**):
+<!-- And you can embed tables (**\autoref{error-table}**): -->
 
-```{r cars, echo=FALSE, warning=FALSE, message = FALSE, results='asis'}
-# comes from 'assemble-all-error-summaries.R`
-
-z<-summary(cars)
-kable(z, "latex", booktabs = T, caption = "\\label{error-table}\\textbf{Summary statistics for cars.} APE is the Description here.") %>%
-  kable_styling(latex_options = c("scale_down")) %>%
-  collapse_rows(columns = 1, latex_hline = "major", valign = "middle") 
-```
+<!-- ```{r cars, echo=FALSE, warning=FALSE, message = FALSE, results='asis'} -->
+<!-- # comes from 'assemble-all-error-summaries.R` -->
+<!-- library(kableExtra) -->
+<!-- z<-summary(tabs) -->
+<!-- options(digits = 1) -->
+<!-- kable(z, "latex", booktabs = T, caption = "\\label{error-table}\\textbf{Summary statistics for cars.} APE is the Description here.") %>% -->
+<!--   kable_styling(latex_options = c("scale_down")) %>% -->
+<!--   collapse_rows(columns = 1, latex_hline = "major", valign = "middle")  -->
+<!-- ``` -->
 
 \newpage
