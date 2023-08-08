@@ -170,16 +170,3 @@ plot_grid(a,b, ncol=1, labels = c("a", "b"),
           align = "v")
 ```
 
-<!-- And you can embed tables (**\autoref{error-table}**): -->
-
-<!-- ```{r cars, echo=FALSE, warning=FALSE, message = FALSE, results='asis'} -->
-<!-- # comes from 'assemble-all-error-summaries.R` -->
-<!-- library(kableExtra) -->
-<!-- z<-summary(tabs) -->
-<!-- options(digits = 1) -->
-<!-- kable(z, "latex", booktabs = T, caption = "\\label{error-table}\\textbf{Summary statistics for cars.} APE is the Description here.") %>% -->
-<!--   kable_styling(latex_options = c("scale_down")) %>% -->
-<!--   collapse_rows(columns = 1, latex_hline = "major", valign = "middle")  -->
-<!-- ``` -->
-
-\newpage
