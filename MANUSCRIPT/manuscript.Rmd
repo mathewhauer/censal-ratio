@@ -6,20 +6,11 @@ blinded: 0
 
 authors: 
 - name: Mathew E. Hauer
-  thanks:  Thanks y'all!
   affiliation: Department of Sociology, Florida State University
   
 
-keywords:
-- keyword
-- keyword
-- keyword
-
-abstract: Lorem Ipsum.
-  
 bibliography: mybibfile
 output: rticles::asa_article
-# csl: LATEX/demography.csl
 header-includes:
   - \usepackage{amsmath}
   - \usepackage{amsfonts}
